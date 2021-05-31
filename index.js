@@ -38,6 +38,9 @@ const parseItem = (key, text) => {
         }
         case 'm': {
             const [m, y] = text.split(' ');
+            if (Number(y).toString() !== y) {
+                return text;
+            }
             const month = new Date(y, m - 1).toLocaleString('ru', { month: 'long' });
             return `${month} ${y}`;
         }
@@ -54,12 +57,13 @@ const addContent = html => {
     const output = document.querySelector('#output');
     const div = document.createElement('div');
     div.innerHTML = html;
-    output.appendChild(div);
+    output.appendChild(div.children[0]);
 };
-const renderTable = list => {
+const css = (styles = {}) => Object.entries(styles).map(([key, value]) => `${key}: ${value}`).join(';');
+const renderTable = (list, styles) => {
     const keys = Object.keys(list[0]);
     const html = `
-        <table>
+        <table style="${css(styles)}">
             <tr>
                 ${keys.map(key => `<th>${key}</th>`).join('')}
             </tr>
@@ -92,7 +96,31 @@ const getDayStat = list => {
     });
     return Object.entries(data).map(([date, count]) => ({ date, count }));
 };
-renderChart = stat => {
+const randomColor = () => {
+    return '#' + Math.floor(0x100000 + Math.random() * 0xefffff).toString(16);
+}
+
+function byte2Hex(n) {
+    var nybHexString = "0123456789ABCDEF";
+    return String(nybHexString.substr((n >> 4) & 0x0F,1)) + nybHexString.substr(n & 0x0F,1);
+}
+function RGB2Color(r,g,b) {
+    return '#' + byte2Hex(r) + byte2Hex(g) + byte2Hex(b);
+}
+const getRainbow = n => {
+    var frequency = .45;
+    const a = [];
+    for (var i = 0; i < n; ++i) {
+       red   = Math.sin(frequency * i + 0) * 127 + 128;
+       green = Math.sin(frequency * i + 2) * 127 + 128;
+       blue  = Math.sin(frequency * i + 4) * 127 + 128;
+    
+       a.push(RGB2Color(red,green,blue));
+    }
+    return a;
+};
+
+const renderChart = (stat, keys = {}) => {
     const id = genId();
 
     addContent(`
@@ -103,28 +131,57 @@ renderChart = stat => {
 
     const ctx = document.querySelector(`#chart-${id} canvas`).getContext('2d');
 
-    var labels = stat.map(({ month }) => parseItem('m', month)).reverse();
-    var data = stat.map(({ count }) => count).reverse();
+    const colors = getRainbow(stat?.vlabels?.length || 0);
 
-    var config = {
+    const labels = stat.labels || stat.map(e => parseItem(keys.type || 'm', e[keys.label || 'month'])).reverse();
+    const datasets = stat.data ? stat.data.map(
+        (item, index) => ({
+            backgroundColor: 'transparent',
+            borderColor: colors.shift(),
+            data: item,
+            borderWidth: 1,
+            pointRadius: 2,
+            label: stat?.vlabels?.[index],
+        })
+    ) : [
+        {
+            backgroundColor: 'transparent',
+            borderColor: '#FF6600',
+            data: stat.map((e) => e[keys.data || 'count']).reverse(),
+            borderWidth: 1,
+            pointRadius: 2,
+        },
+    ];
+
+    const config = {
         type: 'line',
         data: {
             labels,
-            datasets: [{
-                backgroundColor: 'transparent',
-                borderColor: '#FF6600',
-                data,
-                borderWidth: 1,
-                pointRadius: 2,
-            }]
+            datasets,
         },
         options: {
             maintainAspectRatio: false,
-            legend: {
-                display: false,
-            },
-            tooltips: {
+            interaction: {
+                intersect: false,
                 mode: 'index',
+            },
+            plugins: {
+                legend: {
+                    display: false,
+                },
+                tooltip: {
+                    callbacks: {
+                        labelColor: function(context) {
+                            return {
+                                borderColor: 'transparent',
+                                backgroundColor: context.dataset.borderColor,
+                                borderWidth: 2,
+                                borderDash: [2, 2],
+                                borderRadius: 2,
+                            };
+                        },
+                    }
+                }
             },
         }
     };
@@ -143,9 +200,8 @@ const importCSV = async () => {
 
     const monthStat = getMonthStat(list);
     addContent('<h3>By month</h3>');
-    renderChart(monthStat);
-    renderChart(monthStat.slice(0, -7));
-    renderTable(monthStat);
+
+    renderTable(monthStat, {width: '50%'});
     // const sortedMonthStat = monthStat.sort((a, b) => a.count < b.count ? 1 : -1);
     // renderTable(sortedMonthStat);
 
@@ -153,8 +209,34 @@ const importCSV = async () => {
     const sortedDayStat = dayStat
         .sort((a, b) => a.count < b.count ? 1 : -1)
         .filter(({ count }) => count > 1);
-    addContent('<h3>By day</h3>');
-    renderTable(sortedDayStat);
+    renderTable(sortedDayStat, {width: '50%'});
+
+    renderChart(monthStat);
+    renderChart(monthStat.slice(0, -7));
+
+    const yearStat = monthStat.slice(0, -7).reduce((list, item) => {
+        const [month, year] = item.month.split(' ');
+        return {
+            ...list,
+            [year]: list[year] ? [...list[year], item] : [item]
+        }
+    }, {});
+    const yearStatFilled = Object.entries(yearStat).reduce((list, [year, item]) => {
+        const months = Array(12).fill().map((e, i) => String(i + 1).padStart(2, '0'));
+        const filledItem = months.map(month => item.find(e => e.month.split(' ')[0] === month) || { month: `${month} ${year}`, count: 0 });
+        return {
+            ...list,
+            [year]: filledItem,
+        }
+    }, {})
+
+    const byMonthsInYears = {
+        labels: Array(12).fill().map((e, i) => new Date(9999, i).toLocaleString('ru', { month: 'long' })),
+        vlabels: Object.keys(yearStatFilled),
+        data: Object.entries(yearStatFilled).map(([year, item]) => item.map(e => e.count))
+    };
+    renderChart(byMonthsInYears);
+
 }
 // const getKP = async () => {
 //     const input = document.querySelector('#get-kp');
