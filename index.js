@@ -87,6 +87,22 @@ const getMonthStat = list => {
     });
     return Object.entries(data).map(([month, count]) => ({ month, count }));
 };
+const getHoursStat = (list, skip) => {
+    const data = {};
+    list.forEach(item => {
+        const [D, M, Y, h, m] = item.viewdate.split(/[,.:\s]+/ig);
+        const key = h;
+        // skip records before Juny 2013
+        const crop = Number(Y) <= 2013 && Number(M) <= 5
+        if (!skip || !crop) {
+            data[key] = (data[key] || 0) + 1;
+        }
+    });
+    const result = Object.entries(data)
+        .map(([key, value]) => ({ key, value }))
+        .sort((a, b) => Number(a.key) < Number(b.key) ? 1 : -1)
+    return result
+};
 const getDayStat = list => {
     const data = {};
     list.forEach(item => {
@@ -212,6 +228,7 @@ const importCSV = async () => {
     renderTable(sortedDayStat, {width: '50%'});
 
     renderChart(monthStat);
+
     renderChart(monthStat.slice(0, -7));
 
     const yearStat = monthStat.slice(0, -7).reduce((list, item) => {
@@ -237,6 +254,11 @@ const importCSV = async () => {
     };
     renderChart(byMonthsInYears);
 
+    const hoursStat = getHoursStat(list)
+    renderChart(hoursStat, { type: '', label: 'key', data: 'value' });
+
+    const hoursStatCropped = getHoursStat(list, true)
+    renderChart(hoursStatCropped, { type: '', label: 'key', data: 'value' });
 }
 // const getKP = async () => {
 //     const input = document.querySelector('#get-kp');
